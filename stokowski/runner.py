@@ -366,7 +366,12 @@ async def run_agent_turn(
         proc.kill()
         attempt.status = "failed"
         attempt.error = str(e)
-        return attempt
+
+    # Capture full_result from last_message as fallback before any early return.
+    # This ensures we never silently lose results when an exception, stall, or
+    # timeout short-circuits the normal event-processing path.
+    if not attempt.full_result and attempt.last_message:
+        attempt.full_result = attempt.last_message
 
     # Determine final status from exit code if not already set by stall/timeout
     if attempt.status == "streaming":
