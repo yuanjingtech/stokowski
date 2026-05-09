@@ -427,10 +427,13 @@ def _process_event(
                 usage.get("total_tokens", 0)
                 or attempt.input_tokens + attempt.output_tokens
             )
-        # Extract result text for last_message
+        # Extract result text for last_message and full_result
         result_text = event.get("result", "")
         if isinstance(result_text, str) and result_text:
             attempt.last_message = result_text[:200]
+            # Capture full result for auto-posting to Linear
+            if not attempt.full_result:
+                attempt.full_result = result_text
 
     elif event_type == "assistant":
         # Assistant message content
@@ -438,11 +441,18 @@ def _process_event(
         content = msg.get("content", "")
         if isinstance(content, str) and content:
             attempt.last_message = content[:200]
+            if not attempt.full_result:
+                attempt.full_result = content
         elif isinstance(content, list):
+            full_text = ""
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
-                    attempt.last_message = block.get("text", "")[:200]
-                    break
+                    text = block.get("text", "")
+                    full_text += text
+                    if not attempt.last_message:
+                        attempt.last_message = text[:200]
+            if full_text and not attempt.full_result:
+                attempt.full_result = full_text
 
     elif event_type == "tool_use":
         tool_name = event.get("name", event.get("tool", ""))

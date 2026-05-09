@@ -1028,7 +1028,7 @@ class Orchestrator:
                 if not ok:
                     attempt.status = "failed"
                     attempt.error = f"on_stage_enter hook failed for state {state_name}"
-                    self._on_worker_exit(issue, attempt)
+                    await self._on_worker_exit(issue, attempt)
                     return
 
             prompt = await self._render_prompt_async(issue, attempt.attempt, state_name)
@@ -1099,17 +1099,17 @@ class Orchestrator:
                     if attempt.status != "succeeded":
                         break
 
-            self._on_worker_exit(issue, attempt)
+            await self._on_worker_exit(issue, attempt)
 
         except asyncio.CancelledError:
             logger.info(f"Worker cancelled issue={issue.identifier}")
             attempt.status = "canceled"
-            self._on_worker_exit(issue, attempt)
+            await self._on_worker_exit(issue, attempt)
         except Exception as e:
             logger.error(f"Worker error issue={issue.identifier}: {e}")
             attempt.status = "failed"
             attempt.error = str(e)
-            self._on_worker_exit(issue, attempt)
+            await self._on_worker_exit(issue, attempt)
 
     async def _render_prompt_async(
         self, issue: Issue, attempt_num: int | None, state_name: str | None = None
@@ -1218,7 +1218,7 @@ class Orchestrator:
         """Callback for agent events."""
         logger.debug(f"Agent event issue={identifier} type={event_type}")
 
-    def _on_worker_exit(self, issue: Issue, attempt: RunAttempt):
+    async def _on_worker_exit(self, issue: Issue, attempt: RunAttempt):
         """Handle worker completion."""
         self.total_input_tokens += attempt.input_tokens
         self.total_output_tokens += attempt.output_tokens
@@ -1238,6 +1238,15 @@ class Orchestrator:
         self.running.pop(issue.id, None)
         self._tasks.pop(issue.id, None)
         self._release_slot(issue.id)
+
+        # Auto-post agent results to Linear so work is never lost even if the
+        # agent doesn't use Linear MCP. Only post meaningful non-empty content.
+        if attempt.status == "succeeded" and attempt.full_result:
+            result_text = attempt.full_result.strip()
+            # Skip trivial single-word completions (agent probably already posted)
+            if len(result_text) > 10 and result_text.lower() not in ("done", "completed", "done.", "completed."):
+                auto_post = f"**[Stokowski]** State **{attempt.state_name or 'unknown'}** completed.\n\n---\n\n{result_text[:4000]}"
+                await self._safe_post_comment(issue.id, auto_post, "auto-result")
 
         if attempt.status == "succeeded":
             if attempt.state_name and attempt.state_name in self.cfg.states:
