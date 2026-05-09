@@ -194,6 +194,18 @@ class Orchestrator:
             )
         return self._linear
 
+    async def _safe_post_comment(self, issue_id: str, body: str, context: str = "") -> bool:
+        """Post a comment, logging errors without propagating. Returns True on success."""
+        try:
+            client = self._ensure_linear_client()
+            return await client.post_comment(issue_id, body)
+        except Exception as e:
+            logger.error(
+                f"Failed to post comment on {issue_id}{f' ({context})' if context else ''}: {e}",
+                exc_info=True,
+            )
+            return False
+
     async def start(self):
         """Start the orchestration loop."""
         errors = self._load_workflow()
@@ -378,7 +390,7 @@ class Orchestrator:
             prompt=prompt or "",
             run=run,
         )
-        await client.post_comment(issue.id, comment)
+        await self._safe_post_comment(issue.id, comment, "gate-enter")
 
         # Use the gate's own linear_state (per workflow.yaml), not a global one.
         # Previously this hardcoded `linear_states.review`, which forced every
@@ -503,7 +515,7 @@ class Orchestrator:
                 state=target_name,
                 run=run,
             )
-            await client.post_comment(issue.id, comment)
+            await self._safe_post_comment(issue.id, comment, "state-transition")
 
             # Ensure issue is in active Linear state
             active_state = self.cfg.linear_states.active
@@ -548,7 +560,7 @@ class Orchestrator:
                 comment = make_gate_comment(
                     state=gate_state, status="approved", run=run,
                 )
-                await client.post_comment(issue.id, comment)
+                await self._safe_post_comment(issue.id, comment, "gate-approved")
 
                 # Set current state to the gate so _transition can read FROM it,
                 # then route through _transition. This dispatches the approve
@@ -603,7 +615,7 @@ class Orchestrator:
                     comment = make_gate_comment(
                         state=gate_state, status="escalated", run=run,
                     )
-                    await client.post_comment(issue.id, comment)
+                    await self._safe_post_comment(issue.id, comment, "gate-escalated")
                     logger.warning(
                         f"Max rework exceeded issue={issue.identifier} "
                         f"gate={gate_state} run={run} max={max_rework}"
@@ -617,7 +629,7 @@ class Orchestrator:
                     state=gate_state, status="rework",
                     rework_to=rework_to, run=new_run,
                 )
-                await client.post_comment(issue.id, comment)
+                await self._safe_post_comment(issue.id, comment, "gate-rework")
 
                 self._issue_current_state[issue.id] = rework_to
 
@@ -997,13 +1009,12 @@ class Orchestrator:
             if state_name:
                 run = self._issue_state_runs.get(issue.id, 1)
                 if run == 1 and (attempt.attempt is None or attempt.attempt == 0):
-                    client = self._ensure_linear_client()
                     comment = make_state_comment(
                         state=state_name,
                         run=run,
                         workspace_path=str(ws.path),
                     )
-                    await client.post_comment(issue.id, comment)
+                    await self._safe_post_comment(issue.id, comment, "state-enter")
 
             # Run on_stage_enter hook if defined
             if state_cfg and state_cfg.hooks and state_cfg.hooks.on_stage_enter:
