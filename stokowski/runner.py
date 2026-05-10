@@ -25,6 +25,7 @@ def build_claude_args(
     prompt: str,
     workspace_path: Path,
     session_id: str | None = None,
+    plugin_dir: str | None = None,
 ) -> list[str]:
     """Build the claude CLI argument list."""
     args = [claude_cfg.command]
@@ -37,6 +38,10 @@ def build_claude_args(
         args.extend(["-p", prompt])
 
     args.extend(["--verbose", "--output-format", "stream-json"])
+
+    # Expose compound-engineering plugin so ce-* skills/agents are available
+    if plugin_dir:
+        args.extend(["--plugin-dir", plugin_dir])
 
     # Permission mode
     if claude_cfg.permission_mode == "auto":
@@ -52,7 +57,8 @@ def build_claude_args(
     if not session_id:
         headless_context = (
             "You are running in headless/unattended mode via Stokowski orchestrator. "
-            "Do NOT use interactive skills, slash commands, or the Skill tool. "
+            "Do NOT use AskUserQuestion or any other interactive blocking tool. "
+            "You MAY use the Skill tool and Agent tool for structured sub-agent workflows. "
             "Do NOT invoke brainstorming, plan mode, or any interactive workflow. "
             "Work autonomously and directly on the task."
         )
@@ -246,10 +252,11 @@ async def run_agent_turn(
     on_event: EventCallback | None = None,
     on_pid: PidCallback | None = None,
     env: dict[str, str] | None = None,
+    plugin_dir: str | None = None,
 ) -> RunAttempt:
     """Run a single Claude Code turn. Returns updated RunAttempt."""
     args = build_claude_args(
-        claude_cfg, prompt, workspace_path, attempt.session_id
+        claude_cfg, prompt, workspace_path, attempt.session_id, plugin_dir
     )
 
     logger.info(
@@ -479,6 +486,7 @@ async def run_turn(
     on_event: EventCallback | None = None,
     on_pid: PidCallback | None = None,
     env: dict[str, str] | None = None,
+    plugin_dir: str | None = None,
 ) -> RunAttempt:
     """Route to the correct runner based on runner_type."""
     if runner_type == "codex":
@@ -505,6 +513,7 @@ async def run_turn(
             on_event=on_event,
             on_pid=on_pid,
             env=env,
+            plugin_dir=plugin_dir,
         )
     else:
         raise ValueError(f"Unknown runner type: {runner_type}")

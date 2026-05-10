@@ -102,6 +102,7 @@ class LinearStatesConfig:
 class PromptsConfig:
     """Prompt file references."""
     global_prompt: str | None = None
+    plugin_dir: str | None = None  # path to compound-engineering plugin directory
 
 
 @dataclass
@@ -123,6 +124,7 @@ class StateConfig:
     max_rework: int | None = None    # gate only
     transitions: dict[str, str] = field(default_factory=dict)
     hooks: HooksConfig | None = None
+    skill: str | None = None          # compound-engineering skill name (e.g. "ce-work", "lfg")
 
 
 @dataclass
@@ -147,6 +149,7 @@ class ProjectConfig:
     workflow_dir: Path = field(default_factory=lambda: Path("."))
     # Per-project cap (overrides AgentConfig.max_concurrent_per_project[name]).
     max_concurrent: int | None = None
+    plugin_dir: str | None = None  # path to compound-engineering plugin directory
 
     def resolved_api_key(self) -> str:
         key = self.tracker.api_key
@@ -364,6 +367,7 @@ def _parse_state_config(name: str, raw: dict[str, Any]) -> StateConfig:
         max_rework=raw.get("max_rework"),
         transitions=raw.get("transitions") or {},
         hooks=_parse_hooks(hooks_raw) if hooks_raw else None,
+        skill=raw.get("skill"),
     )
 
 
@@ -442,7 +446,10 @@ def _parse_linear_states(raw: dict[str, Any]) -> LinearStatesConfig:
 
 
 def _parse_prompts(raw: dict[str, Any]) -> PromptsConfig:
-    return PromptsConfig(global_prompt=raw.get("global_prompt"))
+    return PromptsConfig(
+        global_prompt=raw.get("global_prompt"),
+        plugin_dir=raw.get("plugin_dir"),
+    )
 
 
 def _parse_states(raw: dict[str, Any]) -> dict[str, StateConfig]:
