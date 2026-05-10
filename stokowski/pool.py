@@ -21,11 +21,18 @@ class ConcurrencyPool:
     Not asyncio-safe in a strict sense, but the orchestrator runs all
     dispatch decisions on the asyncio event loop thread, so claim/release
     are effectively serialised.
+
+    Priority-aware slot allocation: when multiple projects want slots,
+    higher-priority (lower priority number) projects are granted first.
     """
     global_cap: int = 5
     per_project_caps: dict[str, int] = field(default_factory=dict)
     running_per_project: dict[str, int] = field(default_factory=dict)
     paused: set[str] = field(default_factory=set)
+    # Linear project priority per project name: lower = higher priority, 0 = unset (sorts last)
+    project_priority: dict[str, int] = field(default_factory=dict)
+    # Projects that have requested a slot but couldn't get one yet (ordered by priority)
+    _slot_queue: dict[str, int] = field(default_factory=dict)  # name -> when queued (monotonic counter)
 
     def is_paused(self, project_name: str) -> bool:
         return project_name in self.paused
@@ -58,20 +65,102 @@ class ConcurrencyPool:
         """Return the per-project cap, or None if unlimited (subject to global)."""
         return self.per_project_caps.get(project_name)
 
+    def sorted_project_names(self) -> list[str]:
+        """Return project names sorted by priority (lowest priority number = highest priority).
+
+        Projects with priority 0 (unset in Linear) sort after those with explicit priority.
+        Projects not in the priority map sort last.
+        """
+        def sort_key(name: str) -> tuple[int, str]:
+            p = self.project_priority.get(name, 0)
+            # priority 0 = unset, sort it last by treating it as 999
+            effective = p if p > 0 else 999
+            return (effective, name)
+        return sorted(self.paused | set(self.running_per_project) | set(self.per_project_caps) | set(self.project_priority), key=sort_key)
+
+    def request_slot(self, project_name: str) -> None:
+        """Register interest in a slot for a project. Used for priority-aware dispatch."""
+        if project_name not in self._slot_queue:
+            self._slot_queue[project_name] = len(self._slot_queue)
+
+    def grant_queued_slots(self) -> list[str]:
+        """Grant available slots to queued projects in priority order.
+
+        Returns list of project names that were granted a slot this call.
+        """
+        granted: list[str] = []
+        # Sort by priority (use sorted_project_names for consistent priority ordering)
+        priority_order = self.sorted_project_names()
+        queue_sorted = sorted(
+            self._slot_queue.keys(),
+            key=lambda n: (next((i for i, p in enumerate(priority_order) if p == n), 999), self._slot_queue[n])
+        )
+        for name in queue_sorted:
+            if self.available_for(name) <= 0:
+                continue
+            if self.try_claim(name):
+                del self._slot_queue[name]
+                granted.append(name)
+        return granted
+
     def available_for(self, project_name: str) -> int:
         """How many more slots this project can claim right now.
 
-        Considers: pause state, per-project cap, global cap minus current
-        running across all projects.
+        When multiple projects compete for slots, global capacity is allocated
+        in priority order — higher-priority (lower priority number) projects
+        receive slots first before lower-priority projects.
+
+        A higher-priority project only pre-empts if it is *actively consuming*
+        slots (running > 0). Idle higher-priority projects don't block lower ones.
+
+        Paused projects always return 0.
         """
         if self.is_paused(project_name):
             return 0
+
         global_left = max(self.global_cap - self.total_running(), 0)
+        if global_left == 0:
+            return 0
+
         cap = self.per_project_caps.get(project_name)
-        if cap is None:
-            return global_left
-        project_left = max(cap - self.project_running(project_name), 0)
-        return min(global_left, project_left)
+        project_cap = cap if cap is not None else self.global_cap
+
+        # If no priority map exists, fall back to equal distribution
+        if not self.project_priority:
+            return min(global_left, project_cap)
+
+        # Priority-aware allocation: iterate projects in priority order.
+        # - Skip a project if it has no running agents (idle projects don't
+        #   pre-empt capacity from lower-priority but active projects).
+        # - Deduct active higher-priority projects' consumption from remaining.
+        # - Target project gets whatever is left, capped by its own capacity.
+        sorted_names = self.sorted_project_names()
+        remaining = global_left
+
+        for name in sorted_names:
+            if remaining == 0:
+                break
+
+            if name == project_name:
+                # This project is next — it gets remaining slots (capped by own available)
+                name_running = self.project_running(name)
+                own_available = max(project_cap - name_running, 0)
+                return min(remaining, own_available)
+
+            name_running = self.project_running(name)
+            name_cap = self.per_project_caps.get(name)
+            name_project_cap = name_cap if name_cap is not None else self.global_cap
+
+            if name_running >= name_project_cap:
+                continue  # At capacity — can't grow further, no preemption needed
+
+            name_slots = max(name_project_cap - name_running, 0)
+            deduct = min(remaining, name_slots)
+            remaining -= deduct
+
+        # Target not in priority list — give it all remaining slots
+        own_available = max(project_cap - self.project_running(project_name), 0)
+        return min(remaining, own_available)
 
     def try_claim(self, project_name: str) -> bool:
         """Atomically claim one slot. Returns True if claimed."""
