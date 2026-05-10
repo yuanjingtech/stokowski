@@ -207,6 +207,47 @@ agent:
 # ---------------------------------------------------------------------------
 prompts:
   global_prompt: prompts/global.example.md
+  # Optional: path to the compound-engineering plugin directory.
+  # When a state uses the `skill:` field, Stokowski loads the corresponding
+  # SKILL.md from this directory and injects it as the stage prompt.
+  # Defaults to ~/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/3.3.2
+  # plugin_dir: ~/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/3.3.2
+
+# ---------------------------------------------------------------------------
+# Compound-engineering integration (optional)
+# ---------------------------------------------------------------------------
+# To use compound-engineering skills (ce-work, lfg, ce-plan, ce-code-review,
+# etc.), either:
+#   A) Set `prompts.plugin_dir` above, then use `skill: <name>` in a state, OR
+#   B) Set `projects[].plugin_dir` in multi-project mode.
+#
+# The `skill:` field replaces the `prompt:` field — Stokowski loads the
+# skill's SKILL.md from the plugin directory and uses it as the stage prompt.
+# All ce-* skills are fully headless-compatible via the Skill tool.
+#
+# Example: autonomous end-to-end workflow using the `lfg` skill:
+#
+#   ce-lfg:
+#     type: agent
+#     skill: lfg              # loads skills/lfg/SKILL.md from plugin_dir
+#     linear_state: active
+#     model: claude-sonnet-4-6
+#     max_turns: 50
+#     session: inherit
+#     transitions:
+#       complete: done
+#
+# Example: isolated code review using the ce-code-review skill:
+#
+#   ce-review:
+#     type: agent
+#     skill: ce-code-review   # loads skills/ce-code-review/SKILL.md
+#     linear_state: active
+#     model: claude-opus-4-6
+#     max_turns: 15
+#     session: fresh
+#     transitions:
+#       complete: merge
 
 # ---------------------------------------------------------------------------
 # Server (optional web dashboard)

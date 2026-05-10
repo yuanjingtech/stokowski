@@ -2,7 +2,7 @@
 
 Assembles prompts from:
 1. Global prompt — loaded from a .md file referenced in config
-2. Stage prompt — loaded from the state's prompt .md file
+2. Stage prompt — loaded from the state's prompt .md file (or CE skill content)
 3. Lifecycle injection — auto-generated from config + Linear data
 """
 
@@ -15,11 +15,22 @@ from typing import Any
 
 from jinja2 import BaseLoader, Environment, Undefined
 
-from .config import LinearStatesConfig, ServiceConfig, StateConfig
+from .config import LinearStatesConfig, PromptsConfig, ServiceConfig, StateConfig
 from .models import Issue
 from .tracking import get_comments_since, get_last_tracking_timestamp
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("stokowski.prompt")
+
+# Default compound-engineering plugin path
+DEFAULT_CE_PLUGIN_DIR = (
+    Path.home()
+    / ".claude"
+    / "plugins"
+    / "cache"
+    / "compound-engineering-plugin"
+    / "compound-engineering"
+    / "3.3.2"
+)
 
 
 def load_prompt_file(path: str, workflow_dir: str | Path) -> str:
@@ -42,6 +53,29 @@ def load_prompt_file(path: str, workflow_dir: str | Path) -> str:
     if not p.exists():
         raise FileNotFoundError(f"Prompt file not found: {p}")
     return p.read_text()
+
+
+def load_ce_skill(skill_name: str, plugin_dir: str | Path | None = None) -> str:
+    """Load a compound-engineering skill's SKILL.md content.
+
+    Looks for the skill at plugin_dir/skills/{skill_name}/SKILL.md.
+    Falls back to the default CE plugin directory if plugin_dir is not set.
+
+    Args:
+        skill_name: Name of the skill (e.g. "lfg", "ce-work", "ce-plan").
+        plugin_dir: Optional explicit plugin directory path.
+
+    Returns:
+        The SKILL.md content as a string.
+
+    Raises:
+        FileNotFoundError: If the skill file does not exist.
+    """
+    base = Path(plugin_dir) if plugin_dir else DEFAULT_CE_PLUGIN_DIR
+    skill_path = base / "skills" / skill_name / "SKILL.md"
+    if not skill_path.exists():
+        raise FileNotFoundError(f"CE skill not found: {skill_path}")
+    return skill_path.read_text()
 
 
 def render_template(template_str: str, context: dict[str, Any]) -> str:
@@ -237,12 +271,13 @@ def assemble_prompt(
     attempt: int = 1,
     last_run_at: str | None = None,
     comments: list[dict[str, Any]] | None = None,
+    plugin_dir: str | None = None,
 ) -> str:
     """Orchestrate three-layer prompt assembly.
 
     Combines:
     1. Global prompt (from config's prompts.global_prompt path)
-    2. Stage prompt (from state_cfg.prompt path)
+    2. Stage prompt (from state_cfg.prompt path, or CE skill content if skill is set)
     3. Lifecycle injection (auto-generated)
 
     Each layer is rendered as a Jinja2 template with the issue context.
@@ -258,6 +293,8 @@ def assemble_prompt(
         attempt: Retry attempt within this run.
         last_run_at: ISO timestamp of the last run.
         comments: All comments on the issue (for filtering).
+        plugin_dir: Optional explicit path to the compound-engineering plugin directory.
+                   Defaults to the bundled 3.3.2 path if not set.
 
     Returns:
         The fully assembled prompt string.
@@ -283,8 +320,16 @@ def assemble_prompt(
                 "Global prompt file not found: %s", cfg.prompts.global_prompt
             )
 
-    # Layer 2: Stage prompt
-    if state_cfg.prompt:
+    # Layer 2: Stage prompt or CE skill content
+    if state_cfg.skill:
+        # Load CE skill content — replaces stage prompt when skill is configured
+        try:
+            raw = load_ce_skill(state_cfg.skill, plugin_dir)
+            rendered = render_template(raw, context)
+            parts.append(rendered)
+        except FileNotFoundError as e:
+            log.warning("CE skill not found: %s", e)
+    elif state_cfg.prompt:
         try:
             raw = load_prompt_file(state_cfg.prompt, workflow_dir)
             rendered = render_template(raw, context)

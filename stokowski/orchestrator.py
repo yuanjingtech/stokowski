@@ -97,6 +97,23 @@ class Orchestrator:
         self._slot_held: set[str] = set()
 
     @property
+    def plugin_dir(self) -> str | None:
+        """Return the compound-engineering plugin directory for this project.
+
+        Priority:
+        1. ProjectConfig.plugin_dir (explicit per-project override)
+        2. ServiceConfig-level prompts.plugin_dir (shared across projects)
+        3. None (runner falls back to its default)
+        """
+        # Project-level override takes priority
+        if self.project and self.project.plugin_dir:
+            return self.project.plugin_dir
+        # Shared config
+        if self.cfg.prompts.plugin_dir:
+            return self.cfg.prompts.plugin_dir
+        return None
+
+    @property
     def cfg(self) -> ServiceConfig:
         assert self.workflow is not None
         return self.workflow.config
@@ -1042,6 +1059,7 @@ class Orchestrator:
                     on_event=self._on_agent_event,
                     on_pid=self._on_child_pid,
                     env=agent_env,
+                    plugin_dir=self.plugin_dir,
                 )
             else:
                 # Legacy mode: multi-turn loop
@@ -1129,6 +1147,7 @@ class Orchestrator:
                 attempt=attempt_num or 1,
                 last_run_at=last_run_at,
                 comments=comments,
+                plugin_dir=self.plugin_dir,
             )
 
         # Legacy fallback
