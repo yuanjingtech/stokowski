@@ -97,6 +97,7 @@ class LinearStatesConfig:
     rework: str = "Rework"
     terminal: list[str] = field(default_factory=lambda: ["Done", "Closed", "Cancelled"])
     auto_label: str = "auto"           # label name that triggers unattended/skip-gate mode
+    auto_entry_state: str = ""         # state machine state name for auto-labeled issues (e.g. "auto-implement")
 
 
 @dataclass
@@ -442,6 +443,7 @@ def _parse_linear_states(raw: dict[str, Any]) -> LinearStatesConfig:
         rework=str(raw.get("rework", "Rework")),
         terminal=_coerce_list(raw.get("terminal")) or ["Done", "Closed", "Cancelled"],
         auto_label=str(raw.get("auto_label", "auto")),
+        auto_entry_state=str(raw.get("auto_entry_state", "")),
     )
 
 

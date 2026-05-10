@@ -318,7 +318,13 @@ class Orchestrator:
             raise RuntimeError("No entry state defined in config")
 
         # No tracking → entry state, run 1
+        # Auto-labeled issues use the dedicated auto entry state (e.g. auto-implement)
         if tracking is None:
+            auto_entry = self.cfg.linear_states.auto_entry_state
+            if auto_entry and self._issue_is_auto(issue) and auto_entry in self.cfg.states:
+                self._issue_current_state[issue.id] = auto_entry
+                self._issue_state_runs[issue.id] = 1
+                return auto_entry, 1
             self._issue_current_state[issue.id] = entry
             self._issue_state_runs[issue.id] = 1
             return entry, 1

@@ -156,6 +156,7 @@ linear_states:
     - Canceled
     - Duplicate
   auto_label: "auto"                  # label name that triggers unattended/skip-gate mode
+  auto_entry_state: "auto-implement"  # state machine state for auto-labeled issues
 
 # ---------------------------------------------------------------------------
 # Polling
@@ -266,11 +267,9 @@ states:
       complete: implementation-review
 
   # ── 3b. Auto Implement ─────────────────────────────────────────────────
-  # Unattended equivalent of implement — skips all human gates and goes
-  # directly to merge. Issues with the "auto" label should use this path
-  # by having their issue.current_state point here instead of implement.
-  # This is achieved by using auto-label on the gate states that lead
-  # to this fast-track entry point.
+  # Unattended equivalent of implement — skips human implementation-review
+  # gate only. Still goes through code-review and auto-merge-review.
+  # Auto-labeled issues use this as the entry state via linear_states.auto_entry_state.
   auto-implement:
     type: agent
     prompt: prompts/implement.example.md
@@ -279,7 +278,7 @@ states:
     max_turns: 30
     session: inherit
     transitions:
-      complete: auto-final
+      complete: auto-implementation-review
 
   # ── 4. Implementation Review (gate) ─────────────────────────────────────
   # Human reviews the PR before automated code review.
