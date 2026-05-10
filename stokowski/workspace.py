@@ -42,8 +42,13 @@ async def run_hook(script: str, cwd: Path, timeout_ms: int, label: str) -> bool:
             proc.communicate(), timeout=timeout_ms / 1000
         )
         if proc.returncode != 0:
+            stderr_decoded = stderr.decode()
+            # Log full stderr at error level, truncate only in the message prefix
             logger.error(
-                f"hook={label} failed rc={proc.returncode} stderr={stderr.decode()[:500]}"
+                f"hook={label} failed rc={proc.returncode}\n"
+                f"  cwd={cwd}\n"
+                f"  stdout={stdout.decode()[:500]}\n"
+                f"  stderr={stderr_decoded[:500]}"
             )
             return False
         return True
