@@ -836,7 +836,7 @@ class Orchestrator:
                 self.cfg.active_linear_states(),
             )
         except Exception as e:
-            logger.error(f"Failed to fetch candidates: {e}")
+            logger.error(f"{self.cfg.tracker.project_slug} Failed to fetch candidates: {e}")
             return
 
         # Cache issues for retry lookup
@@ -1334,11 +1334,17 @@ class Orchestrator:
         )
         self._retry_timers[issue.id] = handle
 
-        logger.info(
-            f"Retry scheduled issue={issue.identifier} "
-            f"attempt={attempt_num} delay={delay_ms}ms "
-            f"error={error or 'continuation'}"
-        )
+        if error:
+            logger.error(
+                f"Retry scheduled issue={issue.identifier} "
+                f"attempt={attempt_num} delay={delay_ms}ms "
+                f"error={error}"
+            )
+        else:
+            logger.warning(
+                f"Retry scheduled issue={issue.identifier} "
+                f"attempt={attempt_num} delay={delay_ms}ms"
+            )
 
     async def _handle_retry(self, issue_id: str):
         """Handle a retry timer firing."""
