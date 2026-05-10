@@ -154,6 +154,11 @@ class Orchestrator:
 
     # ── Slot management ────────────────────────────────────────────────────
 
+    def _issue_is_auto(self, issue: Issue) -> bool:
+        """Return True if the issue has the auto-label for unattended mode."""
+        auto_label = self.cfg.linear_states.auto_label
+        return auto_label in issue.labels
+
     def _has_slot(self) -> tuple[bool, str | None]:
         """Return (can_dispatch, reason_if_not). Considers pause + global cap."""
         name = self.project_name or ""
@@ -313,7 +318,13 @@ class Orchestrator:
             raise RuntimeError("No entry state defined in config")
 
         # No tracking → entry state, run 1
+        # Auto-labeled issues use the dedicated auto entry state (e.g. auto-implement)
         if tracking is None:
+            auto_entry = self.cfg.linear_states.auto_entry_state
+            if auto_entry and self._issue_is_auto(issue) and auto_entry in self.cfg.states:
+                self._issue_current_state[issue.id] = auto_entry
+                self._issue_state_runs[issue.id] = 1
+                return auto_entry, 1
             self._issue_current_state[issue.id] = entry
             self._issue_state_runs[issue.id] = 1
             return entry, 1
@@ -504,6 +515,13 @@ class Orchestrator:
             self.completed.add(issue.id)
 
         elif target_cfg.type == "gate":
+            # Auto-labeled issues skip gates when label_mode is "auto"
+            if target_cfg.label_mode == "auto" and self._issue_is_auto(issue):
+                self._issue_current_state[issue.id] = target_name
+                # Follow the approve transition directly instead of entering the gate
+                if "approve" in target_cfg.transitions:
+                    asyncio.create_task(self._safe_transition(issue, "approve"))
+                return
             self._issue_current_state[issue.id] = target_name
             await self._enter_gate(issue, target_name)
 
@@ -917,6 +935,12 @@ class Orchestrator:
         # Release the slot we reserved — the gate path doesn't run an agent.
         state_cfg = self.cfg.states.get(state_name) if state_name else None
         if state_cfg and state_cfg.type == "gate":
+            # Auto-labeled issues skip gates when label_mode is "auto"
+            if state_cfg.label_mode == "auto" and self._issue_is_auto(issue):
+                self._release_slot(issue.id)
+                self._issue_current_state[issue.id] = state_name
+                asyncio.create_task(self._safe_transition(issue, "complete"))
+                return
             self._release_slot(issue.id)
             asyncio.create_task(self._safe_enter_gate(issue, state_name))
             return
