@@ -155,6 +155,7 @@ linear_states:
     - Cancelled
     - Canceled
     - Duplicate
+  auto_label: "auto"                  # label name that triggers unattended/skip-gate mode
 
 # ---------------------------------------------------------------------------
 # Polling
@@ -264,12 +265,39 @@ states:
     transitions:
       complete: implementation-review
 
+  # ── 3b. Auto Implement ─────────────────────────────────────────────────
+  # Unattended equivalent of implement — skips all human gates and goes
+  # directly to merge. Issues with the "auto" label should use this path
+  # by having their issue.current_state point here instead of implement.
+  # This is achieved by using auto-label on the gate states that lead
+  # to this fast-track entry point.
+  auto-implement:
+    type: agent
+    prompt: prompts/implement.example.md
+    linear_state: active
+    model: claude-sonnet-4-6
+    max_turns: 30
+    session: inherit
+    transitions:
+      complete: auto-final
+
   # ── 4. Implementation Review (gate) ─────────────────────────────────────
   # Human reviews the PR before automated code review.
   # Rework loops back to implement.
   implementation-review:
     type: gate
     linear_state: review
+    rework_to: implement
+    max_rework: 5
+    transitions:
+      approve: code-review
+
+  # ── 4b. Auto Implementation Review ──────────────────────────────────────
+  # Unattended equivalent of implementation-review.
+  auto-implementation-review:
+    type: gate
+    linear_state: review
+    label_mode: "auto"
     rework_to: implement
     max_rework: 5
     transitions:
@@ -302,6 +330,19 @@ states:
     transitions:
       approve: merge
 
+  # ── 6b. Auto Merge Review ─────────────────────────────────────────────
+  # Unattended equivalent of merge-review. Issues with the "auto" label
+  # skip the human gate and auto-approve. Add label_mode: "auto" to any
+  # gate to enable this behaviour.
+  auto-merge-review:
+    type: gate
+    linear_state: review
+    label_mode: "auto"                # skip gate if issue has auto_label label
+    rework_to: implement
+    max_rework: 5
+    transitions:
+      approve: merge
+
   # ── 7. Merge ────────────────────────────────────────────────────────────
   # Merge the PR and clean up.  Short turn count — just the merge.
   merge:
@@ -315,5 +356,12 @@ states:
 
   # ── 8. Done (terminal) ─────────────────────────────────────────────────
   done:
+    type: terminal
+    linear_state: terminal
+
+  # ── 8b. Auto Final (terminal) ─────────────────────────────────────────
+  # Fast-track terminal for auto-labeled issues that skipped all gates.
+  # The agent should post a final summary and move the ticket to Done.
+  auto-final:
     type: terminal
     linear_state: terminal

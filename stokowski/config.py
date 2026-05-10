@@ -96,6 +96,7 @@ class LinearStatesConfig:
     gate_approved: str = "Gate Approved"
     rework: str = "Rework"
     terminal: list[str] = field(default_factory=lambda: ["Done", "Closed", "Cancelled"])
+    auto_label: str = "auto"           # label name that triggers unattended/skip-gate mode
 
 
 @dataclass
@@ -121,6 +122,7 @@ class StateConfig:
     allowed_tools: list[str] | None = None
     rework_to: str | None = None     # gate only
     max_rework: int | None = None    # gate only
+    label_mode: str | None = None      # "auto" = skip gates for this state when issue has auto label
     transitions: dict[str, str] = field(default_factory=dict)
     hooks: HooksConfig | None = None
 
@@ -359,6 +361,7 @@ def _parse_state_config(name: str, raw: dict[str, Any]) -> StateConfig:
         stall_timeout_ms=raw.get("stall_timeout_ms"),
         session=str(raw.get("session", "inherit")),
         permission_mode=raw.get("permission_mode"),
+        label_mode=raw.get("label_mode"),
         allowed_tools=_coerce_list(allowed) if allowed is not None else None,
         rework_to=raw.get("rework_to"),
         max_rework=raw.get("max_rework"),
@@ -438,6 +441,7 @@ def _parse_linear_states(raw: dict[str, Any]) -> LinearStatesConfig:
         gate_approved=str(raw.get("gate_approved", "Gate Approved")),
         rework=str(raw.get("rework", "Rework")),
         terminal=_coerce_list(raw.get("terminal")) or ["Done", "Closed", "Cancelled"],
+        auto_label=str(raw.get("auto_label", "auto")),
     )
 
 
