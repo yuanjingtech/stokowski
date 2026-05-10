@@ -44,3 +44,4 @@ On rework runs, the workspace already contains prior work.  Check for:
 - An open PR (push to it, do not open a second)
 - Review comments requesting changes (address them specifically)
 - Prior workpad content (append to it, do not overwrite)
+- 总是使用中文
