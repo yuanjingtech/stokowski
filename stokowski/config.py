@@ -96,6 +96,8 @@ class LinearStatesConfig:
     gate_approved: str = "Gate Approved"
     rework: str = "Rework"
     terminal: list[str] = field(default_factory=lambda: ["Done", "Closed", "Cancelled"])
+    auto_label: str = ""              # label name that triggers auto/ skip-gate mode (e.g. "auto")
+    auto_entry_state: str = ""        # state machine state name for auto-labeled issues (e.g. "auto-implement")
 
 
 @dataclass
@@ -121,6 +123,7 @@ class StateConfig:
     allowed_tools: list[str] | None = None
     rework_to: str | None = None     # gate only
     max_rework: int | None = None    # gate only
+    label_mode: str | None = None    # gate only — set to "auto" to auto-approve for labeled issues
     transitions: dict[str, str] = field(default_factory=dict)
     hooks: HooksConfig | None = None
 
@@ -369,6 +372,7 @@ def _parse_state_config(name: str, raw: dict[str, Any]) -> StateConfig:
         allowed_tools=_coerce_list(allowed) if allowed is not None else None,
         rework_to=raw.get("rework_to"),
         max_rework=raw.get("max_rework"),
+        label_mode=raw.get("label_mode"),
         transitions=raw.get("transitions") or {},
         hooks=_parse_hooks(hooks_raw) if hooks_raw else None,
     )
@@ -445,6 +449,8 @@ def _parse_linear_states(raw: dict[str, Any]) -> LinearStatesConfig:
         gate_approved=str(raw.get("gate_approved", "Gate Approved")),
         rework=str(raw.get("rework", "Rework")),
         terminal=_coerce_list(raw.get("terminal")) or ["Done", "Closed", "Cancelled"],
+        auto_label=str(raw.get("auto_label", "")),
+        auto_entry_state=str(raw.get("auto_entry_state", "")),
     )
 
 
@@ -761,6 +767,9 @@ def _validate_project(project: ProjectConfig, errors: list[str]) -> None:
     reachable: set[str] = set()
     if entry:
         reachable.add(entry)
+    # Auto entry state is reachable via auto-label dispatch
+    if project.linear_states.auto_entry_state:
+        reachable.add(project.linear_states.auto_entry_state)
     for sc in project.states.values():
         for target in sc.transitions.values():
             reachable.add(target)

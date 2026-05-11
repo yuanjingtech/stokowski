@@ -320,6 +320,10 @@ class Orchestrator:
                     return entry
         return None
 
+    def _issue_is_auto(self, issue: Issue) -> bool:
+        """Return True if the issue has the 'auto' label (case-insensitive)."""
+        return "auto" in issue.labels
+
     async def _resolve_current_state(self, issue: Issue) -> tuple[str, int]:
         """Resolve current state machine state for an issue.
         Returns (state_name, run).
@@ -537,6 +541,26 @@ class Orchestrator:
             self.completed.add(issue.id)
 
         elif target_cfg.type == "gate":
+            # Auto-labeled issues skip gates when label_mode is "auto"
+            if self._issue_is_auto(issue) and target_cfg.label_mode == "auto":
+                run = self._issue_state_runs.get(issue.id, 1)
+                comment = make_gate_comment(
+                    state=target_name, status="approved", run=run,
+                )
+                await self._safe_post_comment(issue.id, comment, "auto-gate-skip")
+
+                client = self._ensure_linear_client()
+                await client.update_issue_state(issue.id, self.cfg.linear_states.gate_approved)
+
+                self._issue_current_state[issue.id] = target_name
+                if "approve" in target_cfg.transitions:
+                    asyncio.create_task(self._safe_transition(issue, "approve"))
+                else:
+                    logger.warning(
+                        f"Auto gate {target_name} has no approve transition for {issue.identifier}"
+                    )
+                return
+
             self._issue_current_state[issue.id] = target_name
             await self._enter_gate(issue, target_name)
 
@@ -947,11 +971,20 @@ class Orchestrator:
             state_name = self.cfg.entry_state
 
         # If at a gate, enter it instead of dispatching a worker.
-        # Release the slot we reserved — the gate path doesn't run an agent.
+        # Auto-labeled issues skip gates when label_mode is "auto".
         state_cfg = self.cfg.states.get(state_name) if state_name else None
         if state_cfg and state_cfg.type == "gate":
             self._release_slot(issue.id)
-            asyncio.create_task(self._safe_enter_gate(issue, state_name))
+            if self._issue_is_auto(issue) and state_cfg.label_mode == "auto":
+                run = self._issue_state_runs.get(issue.id, 1)
+                asyncio.create_task(self._safe_post_comment(
+                    issue.id,
+                    make_gate_comment(state=state_name, status="approved", run=run),
+                    "auto-gate-skip",
+                ))
+                asyncio.create_task(self._safe_transition(issue, "complete"))
+            else:
+                asyncio.create_task(self._safe_enter_gate(issue, state_name))
             return
 
         attempt = RunAttempt(
