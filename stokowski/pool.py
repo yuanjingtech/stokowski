@@ -130,35 +130,36 @@ class ConcurrencyPool:
             return min(global_left, project_cap)
 
         # Priority-aware allocation: iterate projects in priority order.
-        # - Skip a project if it has no running agents (idle projects don't
-        #   pre-empt capacity from lower-priority but active projects).
-        # - Deduct active higher-priority projects' consumption from remaining.
-        # - Target project gets whatever is left, capped by its own capacity.
+        #
+        # global_left = global_cap - total_running already accounts for ALL
+        # currently-running agents across every project.  If we simply
+        # returned global_left, lower-priority projects would see fewer slots
+        # than they actually have because higher-priority agents' current
+        # consumption is already baked in.
+        #
+        # We fix this by starting from global_left and ADDING BACK the growth
+        # potential of higher-priority projects (max(cap - running, 0)) before
+        # reaching the target project in priority order.
+        #
+        # Effect: idle higher-priority projects add 0 (no pre-emption).
+        # Active higher-priority projects add their remaining growth headroom,
+        # which restores the "correct" pool size for lower-priority projects.
         sorted_names = self.sorted_project_names()
         remaining = global_left
 
         for name in sorted_names:
-            if remaining == 0:
-                break
-
             if name == project_name:
-                # This project is next — it gets remaining slots (capped by own available)
-                name_running = self.project_running(name)
-                own_available = max(project_cap - name_running, 0)
+                own_available = max(project_cap - self.project_running(name), 0)
                 return min(remaining, own_available)
 
             name_running = self.project_running(name)
             name_cap = self.per_project_caps.get(name)
             name_project_cap = name_cap if name_cap is not None else self.global_cap
+            remaining += max(name_project_cap - name_running, 0)
+            # Keep remaining bounded so it never exceeds what's actually free
+            remaining = min(remaining, self.global_cap - self.project_running(name))
 
-            if name_running >= name_project_cap:
-                continue  # At capacity — can't grow further, no preemption needed
-
-            name_slots = max(name_project_cap - name_running, 0)
-            deduct = min(remaining, name_slots)
-            remaining -= deduct
-
-        # Target not in priority list — give it all remaining slots
+        # Target not in priority list — give it all remaining headroom
         own_available = max(project_cap - self.project_running(project_name), 0)
         return min(remaining, own_available)
 
